@@ -1,0 +1,12 @@
+{
+	"extends": ["@dataport/eslint-config-geodev"],
+	"parserOptions": {
+		"ecmaVersion": 2020,
+		"sourceType": "module"
+	},
+	"env": {
+		"browser": true,
+		"es2020": true,
+		"node": true
+	}
+}
