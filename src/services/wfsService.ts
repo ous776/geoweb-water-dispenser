@@ -2,9 +2,7 @@ import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import type { WaterDispenser } from '@/types';
 
-/**
- * Service for fetching water dispenser data from WFS
- */
+
 export class WFSService {
 	private wfsUrl: string;
 	private featureType: string;
@@ -14,9 +12,7 @@ export class WFSService {
 		this.featureType = featureType;
 	}
 
-	/**
-	 * Create a vector source with WFS data
-	 */
+	
 	createVectorSource(): VectorSource {
 		return new VectorSource({
 			format: new GeoJSON(),
@@ -29,9 +25,7 @@ export class WFSService {
 		});
 	}
 
-	/**
-	 * Fetch water dispenser data
-	 */
+	
 	async fetchWaterDispensers(): Promise<WaterDispenser[]> {
 		try {
 			const response = await fetch(
@@ -50,9 +44,7 @@ export class WFSService {
 		}
 	}
 
-	/**
-	 * Parse GeoJSON features to WaterDispenser objects
-	 */
+	
 	private parseFeatures(geojson: GeoJSON.FeatureCollection): WaterDispenser[] {
 		return geojson.features.map((feature, index) => ({
 			id: feature.id?.toString() || `dispenser-${index}`,

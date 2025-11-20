@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "ol": "^10.7.0",
+    "proj4": "^2.20.2",
     "vue": "^3.5.22"
   },
   "devDependencies": {
