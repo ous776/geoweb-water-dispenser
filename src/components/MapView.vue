@@ -7,10 +7,12 @@ import OSM from 'ol/source/OSM.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
-import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style';
+import { Circle as CircleStyle, Fill, Stroke, Style, Text, RegularShape } from 'ol/style';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import Feature from 'ol/Feature';
 import type { Geometry } from 'ol/geom';
+import type { FeatureLike } from 'ol/Feature';
+import { defaults as defaultControls, Zoom, ScaleLine, FullScreen } from 'ol/control';
 
 const GEOSERVER_URL = 'http://localhost:8080/geoserver';
 const WORKSPACE = 'water_dispensers';
@@ -38,24 +40,110 @@ const waterTypeOptions = [
 	{ value: 'filtered', label: 'Filtered Water' }
 ];
 
-onMounted(() => {
-	vectorSource = new VectorSource({
-		format: new GeoJSON(),
-		url: `${GEOSERVER_URL}/${WORKSPACE}/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=${WORKSPACE}:${LAYER}&outputFormat=application/json`
-	});
 
-
-	const waterIcon = new Style({
-		image: new CircleStyle({
-			radius: 8,
-			fill: new Fill({ color: '#2196F3' }),
+const getDispenserStyle = (feature: FeatureLike): Style => {
+	const props = feature.getProperties();
+	
+	const waterTypes = props.water_types ? props.water_types.split(',') : [];
+	const isIndoor = props.is_indoor;
+	
+	
+	let color = '#2196F3'; 
+	let label = 'STW'; // Still
+	
+	if (waterTypes.includes('sparkling')) {
+		color = '#FF6B6B'; 
+		label = 'SPW'; // Sparkling
+	} else if (waterTypes.includes('filtered')) {
+		color = '#4CAF50'; 
+		label = 'FTW'; // Filtered
+	} else if (waterTypes.includes('still')) {
+		color = '#2196F3'; 
+		label = 'STW'; // Still
+	}
+	
+	
+	const imageStyle = isIndoor 
+		? new RegularShape({
+				fill: new Fill({ color: color }),
+				stroke: new Stroke({ color: '#fff', width: 2 }),
+				points: 4,
+				radius: 10,
+				angle: Math.PI / 4
+			})
+		: new CircleStyle({
+				radius: 10,
+				fill: new Fill({ color: color }),
+				stroke: new Stroke({ color: '#fff', width: 2 })
+			});
+	
+	return new Style({
+		image: imageStyle,
+		text: new Text({
+			text: label,
+			offsetY: -20,
+			font: '16px sans-serif',
+			fill: new Fill({ color: '#000' }),
 			stroke: new Stroke({ color: '#fff', width: 2 })
 		})
 	});
+};
+
+onMounted(() => {
+
+	vectorSource = new VectorSource({
+		format: new GeoJSON()
+	});
+	
+
+	const loadAllFeatures = async () => {
+		const url = `${GEOSERVER_URL}/${WORKSPACE}/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=${WORKSPACE}:${LAYER}&outputFormat=application/json&_t=${Date.now()}`;
+
+		
+		try {
+			const response = await fetch(url);
+			const geojson = await response.json();
+
+			
+
+			geojson.features?.forEach((f: { id: string; properties: { name: any; original_fid: any; }; }, i: any) => {
+
+				const originalId = f.id;
+				
+				if (originalId) {
+					f.properties.original_fid = originalId;
+				}
+
+				f.id = `dispenser_${i}_${Date.now()}`;
+			});
+			
+			const features = new GeoJSON().readFeatures(geojson, {
+				dataProjection: 'EPSG:4326',
+				featureProjection: 'EPSG:3857'
+			});
+			
+			vectorSource.addFeatures(features);
+			
+
+			if (features.length > 0) {
+				const extent = vectorSource.getExtent();
+				console.log('Features extent:', extent);
+				map.getView().fit(extent, {
+					padding: [100, 100, 100, 100],
+					maxZoom: 16,
+					duration: 1000
+				});
+			}
+		} catch (error) {
+			console.error('Error loading features:', error);
+		}
+	};
+
+
 
 	vectorLayer = new VectorLayer({
 		source: vectorSource,
-		style: waterIcon
+		style: getDispenserStyle
 	});
 
 	const osmLayer = new TileLayer({
@@ -65,12 +153,25 @@ onMounted(() => {
 	map = new Map({
 		target: 'map',
 		layers: [osmLayer, vectorLayer],
+		controls: defaultControls().extend([
+			new Zoom({
+				className: 'ol-zoom'
+			}),
+			new ScaleLine({
+				units: 'metric'
+			}),
+			new FullScreen()
+		]),
 		view: new View({
 			center: fromLonLat([9.90, 54.316]), // Kiel
-			zoom:14
+			zoom: 14,
+			minZoom: 2,
+			maxZoom: 19
 		})
 	});
 
+
+	loadAllFeatures();
 
 	setTimeout(() => {
 		map.updateSize();
@@ -132,6 +233,49 @@ function cancelEdit() {
 	selectedFeature.value = null;
 }
 
+async function refreshMap() {
+
+	vectorSource.clear();
+	
+	const url = `${GEOSERVER_URL}/${WORKSPACE}/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=${WORKSPACE}:${LAYER}&outputFormat=application/json&_t=${Date.now()}`;
+
+	
+	try {
+		const response = await fetch(url);
+		const geojson = await response.json();
+		
+		
+		geojson.features?.forEach((f: { id: string; properties: { original_fid: any; }; }, i: any) => {
+
+			if (f.id) {
+				f.properties.original_fid = f.id;
+			}
+
+			f.id = `dispenser_${i}_${Date.now()}`;
+		});
+		
+		const features = new GeoJSON().readFeatures(geojson, {
+			dataProjection: 'EPSG:4326',
+			featureProjection: 'EPSG:3857'
+		});
+		
+		vectorSource.addFeatures(features);
+		
+	
+		if (features.length > 0) {
+			const extent = vectorSource.getExtent();
+			map.getView().fit(extent, {
+				padding: [100, 100, 100, 100],
+				maxZoom: 16,
+				duration: 1000
+			});
+		}
+	} catch (error) {
+		console.error('Error reloading features:', error);
+	}
+}
+
+
 async function saveDispenser() {
 	const coords = formData.value.coordinates.split(',').map(c => parseFloat(c.trim()));
 	if (coords.length !== 2 || isNaN(coords[0]) || isNaN(coords[1])) {
@@ -163,13 +307,23 @@ async function saveDispenser() {
 	console.log('Saving feature:', feature);
 
 	if (selectedFeature.value) {
-		await updateFeature(selectedFeature.value.getId(), feature);
+		const props = selectedFeature.value.getProperties();
+		const originalFid = props.original_fid;
+		
+		if (!originalFid) {
+			alert('Cannot update: Original feature ID not found.');
+			return;
+		}
+		
+		await updateFeature(originalFid, feature);
 	} else {
 		await insertFeature(feature);
 	}
 }
 
+//Insert to Database
 async function insertFeature(feature: any) {
+	
 	const wfsTransaction = `
 		<wfs:Transaction service="WFS" version="1.1.0"
 			xmlns:wfs="http://www.opengis.net/wfs"
@@ -251,26 +405,38 @@ async function deleteDispenser() {
 		return;
 	}
 	
-	const wfsTransaction = `
-		<wfs:Transaction service="WFS" version="1.1.0"
-			xmlns:wfs="http://www.opengis.net/wfs"
-			xmlns:ogc="http://www.opengis.net/ogc"
-			xmlns:${WORKSPACE}="http://${WORKSPACE}">
-			<wfs:Delete typeName="${WORKSPACE}:${LAYER}">
-				<ogc:Filter>
-					<ogc:FeatureId fid="${selectedFeature.value.getId()}"/>
-				</ogc:Filter>
-			</wfs:Delete>
-		</wfs:Transaction>
-	`;
+
+	const props = selectedFeature.value.getProperties();
+	const originalFid = props.original_fid;
+	
+	
+	if (!originalFid) {
+		alert('Cannot delete: Original feature ID not found.');
+		return;
+	}
+		
+	let wfsTransaction;
+	
+	
+		wfsTransaction = `
+			<wfs:Transaction service="WFS" version="1.1.0"
+				xmlns:wfs="http://www.opengis.net/wfs"
+				xmlns:ogc="http://www.opengis.net/ogc"
+				xmlns:${WORKSPACE}="http://${WORKSPACE}">
+				<wfs:Delete typeName="${WORKSPACE}:${LAYER}">
+					<ogc:Filter>
+						<ogc:FeatureId fid="${originalFid}"/>
+					</ogc:Filter>
+				</wfs:Delete>
+			</wfs:Transaction>
+		`;
+	
 	
 	await sendTransaction(wfsTransaction);
 }
 
 async function sendTransaction(xml: string) {
 	try {
-		console.log('Sending WFS transaction to:', `${GEOSERVER_URL}/${WORKSPACE}/wfs`);
-		console.log('Transaction XML:', xml);
 		
 		const response = await fetch(`${GEOSERVER_URL}/${WORKSPACE}/wfs`, {
 			method: 'POST',
@@ -280,28 +446,24 @@ async function sendTransaction(xml: string) {
 			body: xml
 		});
 		
-		console.log('Response status:', response.status);
-		console.log('Response headers:', response.headers);
 		
 		const data = await response.text();
-		console.log('GeoServer response:', data);
+
 		
 		if (data.includes('read-only')) {
 			alert('Error: The layer is configured as read-only in GeoServer.\n\nTo fix:\n1. Open GeoServer Admin\n2. Go to Layers → water_dispensers:dispensers\n3. Check the layer is not read-only\n4. Enable WFS-T (transactional) access');
 		} else if (data.includes('Exception') || data.includes('Error')) {
-			console.error('GeoServer error:', data);
 			alert('Error from GeoServer: ' + data.substring(0, 500));
 		} else if (data.includes('TransactionResponse')) {
-			console.log('Transaction successful');
-			alert('Dispenser saved successfully!');
+		
+			alert('Transaction Successful!');
 			cancelEdit();
-			vectorSource.refresh();
+		
+			await refreshMap();
 		} else {
-			console.warn('Unexpected response:', data);
 			alert('Unexpected response from server');
 		}
 	} catch (error) {
-		console.error('Transaction error:', error);
 		alert('Error performing transaction: ' + (error as Error).message);
 	}
 }
@@ -324,6 +486,36 @@ function escapeXml(str: string): string {
 <template>
 	<div class="map-container">
 		<div id="map" role="application" aria-label="Water dispenser map"></div>
+		
+		<aside class="legend" role="complementary" aria-label="Map legend">
+			<h3>Legend</h3>
+			<div class="legend-section">
+				<h4>Water Types</h4>
+				<div class="legend-item">
+					<span class="legend-symbol circle" style="background-color: #2196F3;"></span>
+					<span>STW - Still Water</span>
+				</div>
+				<div class="legend-item">
+					<span class="legend-symbol circle" style="background-color: #FF6B6B;"></span>
+					<span>SPW - Sparkling Water</span>
+				</div>
+				<div class="legend-item">
+					<span class="legend-symbol circle" style="background-color: #4CAF50;"></span>
+					<span>FTW - Filtered Water</span>
+				</div>
+			</div>
+			<div class="legend-section">
+				<h4>Location Type</h4>
+				<div class="legend-item">
+					<span class="legend-symbol circle" style="background-color: #999;"></span>
+					<span> Outdoor</span>
+				</div>
+				<div class="legend-item">
+					<span class="legend-symbol square" style="background-color: #999;"></span>
+					<span> Indoor</span>
+				</div>
+			</div>
+		</aside>
 		
 		<aside class="control-panel" role="complementary" aria-label="Dispenser controls">
 			<h2>Water Dispensers</h2>
@@ -373,7 +565,7 @@ function escapeXml(str: string): string {
 				
 				<div class="form-group">
 					<label for="coordinates">Coordinates:</label>
-					<input type="text" id="coordinates" v-model="formData.coordinates" readonly />
+					<input type="text" id="coordinates" v-model="formData.coordinates"  />
 					<small>{{ formData.coordinates ? 'Click map to change' : 'Click on map to set location' }}</small>
 				</div>
 				
@@ -401,6 +593,66 @@ function escapeXml(str: string): string {
 	flex: 1;
 	width: 100%;
 	height: 100%;
+}
+
+.legend {
+	position: absolute;
+	bottom: 10px;
+	left: 10px;
+	background: white;
+	padding: 1rem;
+	border-radius: 8px;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+	z-index: 1000;
+	min-width: 200px;
+}
+
+.legend h3 {
+	margin: 0 0 0.75rem 0;
+	font-size: 1.1rem;
+	color: #2c3e50;
+	border-bottom: 2px solid #2196F3;
+	padding-bottom: 0.5rem;
+}
+
+.legend h4 {
+	margin: 0.75rem 0 0.5rem 0;
+	font-size: 0.9rem;
+	color: #555;
+	font-weight: 600;
+}
+
+.legend-section {
+	margin-bottom: 0.5rem;
+}
+
+.legend-section:last-child {
+	margin-bottom: 0;
+}
+
+.legend-item {
+	display: flex;
+	align-items: center;
+	margin-bottom: 0.5rem;
+	font-size: 0.85rem;
+}
+
+.legend-symbol {
+	width: 16px;
+	height: 16px;
+	margin-right: 0.5rem;
+	border: 2px solid white;
+	box-shadow: 0 0 0 1px #ccc;
+	flex-shrink: 0;
+}
+
+.legend-symbol.circle {
+	border-radius: 50%;
+}
+
+.legend-symbol.square {
+	border-radius: 2px;
+	transform: rotate(45deg);
 }
 
 .control-panel {
@@ -541,6 +793,12 @@ button:focus {
 }
 
 @media (max-width: 768px) {
+	.legend {
+		position: static;
+		border-radius: 0;
+		margin-bottom: 0.5rem;
+	}
+	
 	.control-panel {
 		position: static;
 		max-width: 100%;

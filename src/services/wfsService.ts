@@ -2,6 +2,21 @@ import VectorSource from 'ol/source/Vector';
 import GeoJSON from 'ol/format/GeoJSON';
 import type { WaterDispenser } from '@/types';
 
+interface GeoJSONFeature {
+	type: string;
+	id?: string | number;
+	geometry: {
+		type: string;
+		coordinates: number[];
+	};
+	properties: Record<string, any>;
+}
+
+interface GeoJSONFeatureCollection {
+	type: string;
+	features: GeoJSONFeature[];
+}
+
 
 export class WFSService {
 	private wfsUrl: string;
@@ -19,7 +34,7 @@ export class WFSService {
 			url: (extent): string => {
 				return `${this.wfsUrl}?service=WFS&version=1.1.0&request=GetFeature&typename=${this.featureType}&outputFormat=application/json&srsname=EPSG:3857&bbox=${extent.join(',')},EPSG:3857`;
 			},
-			strategy: (extent, resolution): [number, number, number, number][] => {
+			strategy: (extent): [number, number, number, number][] => {
 				return [extent as [number, number, number, number]];
 			},
 		});
@@ -45,12 +60,14 @@ export class WFSService {
 	}
 
 	
-	private parseFeatures(geojson: GeoJSON.FeatureCollection): WaterDispenser[] {
+	private parseFeatures(geojson: GeoJSONFeatureCollection): WaterDispenser[] {
 		return geojson.features.map((feature, index) => ({
 			id: feature.id?.toString() || `dispenser-${index}`,
 			name: feature.properties?.name || 'Water Dispenser',
 			longitude: feature.geometry.coordinates[0],
 			latitude: feature.geometry.coordinates[1],
+			waterType: feature.properties?.water_types?.split(',')[0] || 'still',
+			locationType: feature.properties?.is_indoor ? 'indoor' : 'outdoor',
 			address: feature.properties?.address,
 			description: feature.properties?.description,
 		}));
