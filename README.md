@@ -370,12 +370,12 @@ This application follows WCAG 2.1 Level AA guidelines:
 
 ## License
 
-This project is for educational purposes as part of the GeoWeb course at HAW Hamburg.
+This project is for educational purposes as part of the GeoWeb course at HAW-Kiel.
 
 ## Author
 
 Ousman Camara
-HAW Hamburg - GeoWeb Course
+HAW-Kiel, GeoWeb Course
 December 2025
 
 ## Acknowledgments
