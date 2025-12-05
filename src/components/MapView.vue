@@ -22,7 +22,7 @@ let map: Map;
 let vectorSource: VectorSource;
 let vectorLayer: VectorLayer<VectorSource>;
 
-const editMode = ref(false);
+const viewMode = ref<'list' | 'view' | 'edit' | 'add'>('list'); 
 const selectedFeature = ref<any>(null);
 const formData = ref({
 	name: '',
@@ -59,7 +59,7 @@ const getDispenserStyle = (feature: FeatureLike): Style => {
 		label = 'FTW'; // Filtered
 	} else if (waterTypes.includes('still')) {
 		color = '#2196F3'; 
-		label = 'STW'; // Still
+		label = 'STW'; 
 	}
 	
 	
@@ -178,23 +178,25 @@ onMounted(() => {
 	}, 100);
 
 	map.on('click', (evt) => {
-		if (editMode.value) {
+
+		let clickedFeature = false;
+		map.forEachFeatureAtPixel(evt.pixel, (feature) => {
+			if (feature instanceof Feature) {
+				viewFeature(feature as Feature<Geometry>);
+				clickedFeature = true;
+			}
+			return true;
+		});
+		
+		if (!clickedFeature && viewMode.value === 'add') {
 			const coords = toLonLat(evt.coordinate);
 			formData.value.coordinates = `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}`;
-		} else {
-
-			map.forEachFeatureAtPixel(evt.pixel, (feature) => {
-				if (feature instanceof Feature) {
-					editFeature(feature as Feature<Geometry>);
-				}
-				return true;
-			});
 		}
 	});
 })
 
 function startAddMode() {
-	editMode.value = true;
+	viewMode.value = 'add';
 	selectedFeature.value = null;
 	formData.value = {
 		name: '',
@@ -207,8 +209,12 @@ function startAddMode() {
 	};
 }
 
-function editFeature(feature: Feature<Geometry>) {
-	editMode.value = true;
+function startEditMode() {
+	viewMode.value = 'edit';
+}
+
+function viewFeature(feature: Feature<Geometry>) {
+	viewMode.value = 'view';
 	selectedFeature.value = feature;
 	
 	const props = feature.getProperties();
@@ -229,7 +235,7 @@ function editFeature(feature: Feature<Geometry>) {
 }
 
 function cancelEdit() {
-	editMode.value = false;
+	viewMode.value = 'list';
 	selectedFeature.value = null;
 }
 
@@ -485,12 +491,12 @@ function escapeXml(str: string): string {
 
 <template>
 	<div class="map-container">
-		<div id="map" role="application" aria-label="Water dispenser map"></div>
+		<div id="map" aria-label="Interactive map showing water dispenser locations"></div>
 		
 		<aside class="legend" role="complementary" aria-label="Map legend">
-			<h3>Legend</h3>
+			<h2 class="legend-title">Legend</h2>
 			<div class="legend-section">
-				<h4>Water Types</h4>
+				<h3 class="legend-subtitle">Water Types</h3>
 				<div class="legend-item">
 					<span class="legend-symbol circle" style="background-color: #2196F3;"></span>
 					<span>STW - Still Water</span>
@@ -505,7 +511,7 @@ function escapeXml(str: string): string {
 				</div>
 			</div>
 			<div class="legend-section">
-				<h4>Location Type</h4>
+				<h3 class="legend-subtitle">Location Type</h3>
 				<div class="legend-item">
 					<span class="legend-symbol circle" style="background-color: #999;"></span>
 					<span> Outdoor</span>
@@ -518,14 +524,64 @@ function escapeXml(str: string): string {
 		</aside>
 		
 		<aside class="control-panel" role="complementary" aria-label="Dispenser controls">
-			<h2>Water Dispensers</h2>
+			<h2 class="panel-title">Water Dispensers</h2>
 			
-			<div v-if="!editMode" class="view-mode">
+			<div v-if="viewMode === 'list'" class="list-mode">
 				<button @click="startAddMode" class="btn-primary">Add New Dispenser</button>
-				<p class="hint">Click on a marker to view/edit details</p>
+				<p class="hint">Click on a marker to view details</p>
 			</div>
 			
-			<form v-else @submit.prevent="saveDispenser" class="edit-mode">
+			<div v-else-if="viewMode === 'view'" class="view-details">
+				<div class="detail-header">
+					<h3>{{ formData.name }}</h3>
+					<span class="location-badge">{{ formData.location_name }}</span>
+				</div>
+				
+				<div class="detail-section">
+					<div class="detail-item">
+						<span class="detail-label">Water Types:</span>
+						<div class="water-type-tags">
+							<span v-for="type in formData.water_types" :key="type" 
+								class="water-tag" 
+								:class="`water-tag-${type}`">
+								{{ waterTypeOptions.find(opt => opt.value === type)?.label }}
+							</span>
+						</div>
+					</div>
+					
+					<div class="detail-item">
+						<span class="detail-label">Location:</span>
+						<span class="detail-value">
+							<span class="location-icon">{{ formData.is_indoor ? '🏢' : '🌳' }}</span>
+							{{ formData.is_indoor ? 'Indoor' : 'Outdoor' }}
+						</span>
+					</div>
+					
+					<div v-if="formData.is_indoor && formData.floor" class="detail-item">
+						<span class="detail-label">Floor:</span>
+						<span class="detail-value">{{ formData.floor }}</span>
+					</div>
+					
+					<div v-if="formData.description" class="detail-item">
+						<span class="detail-label">Description:</span>
+						<p class="detail-description">{{ formData.description }}</p>
+					</div>
+					
+					<div class="detail-item">
+						<span class="detail-label">Coordinates:</span>
+						<span class="detail-value coordinates">{{ formData.coordinates }}</span>
+					</div>
+				</div>
+				
+				<div class="button-group">
+					<button @click="startEditMode" class="btn-primary">Edit</button>
+					<button @click="cancelEdit" class="btn-secondary">Close</button>
+					<button @click="deleteDispenser" class="btn-danger">Delete</button>
+				</div>
+			</div>
+			
+			<!-- Edit/Add Mode: Show form -->
+			<form v-else-if="viewMode === 'edit' || viewMode === 'add'" @submit.prevent="saveDispenser" class="edit-mode">
 				<div class="form-group">
 					<label for="name">Name:</label>
 					<input type="text" id="name" v-model="formData.name" required />
@@ -607,18 +663,19 @@ function escapeXml(str: string): string {
 	min-width: 200px;
 }
 
-.legend h3 {
+.legend-title {
 	margin: 0 0 0.75rem 0;
 	font-size: 1.1rem;
-	color: #2c3e50;
+	color: #1a1a1a;
 	border-bottom: 2px solid #2196F3;
 	padding-bottom: 0.5rem;
+	font-weight: 700;
 }
 
-.legend h4 {
+.legend-subtitle {
 	margin: 0.75rem 0 0.5rem 0;
 	font-size: 0.9rem;
-	color: #555;
+	color: #1a1a1a;
 	font-weight: 600;
 }
 
@@ -633,14 +690,16 @@ function escapeXml(str: string): string {
 .legend-item {
 	display: flex;
 	align-items: center;
-	margin-bottom: 0.5rem;
-	font-size: 0.85rem;
+	margin-bottom: 0.75rem;
+	font-size: 0.9rem;
+	padding: 0.25rem 0;
+	min-height: 32px;
 }
 
 .legend-symbol {
-	width: 16px;
-	height: 16px;
-	margin-right: 0.5rem;
+	width: 20px;
+	height: 20px;
+	margin-right: 0.75rem;
 	border: 2px solid white;
 	box-shadow: 0 0 0 1px #ccc;
 	flex-shrink: 0;
@@ -669,20 +728,129 @@ function escapeXml(str: string): string {
 	z-index: 1000;
 }
 
-.control-panel h2 {
+.panel-title {
 	margin: 0 0 1rem 0;
 	font-size: 1.25rem;
-	color: #2c3e50;
+	color: #1a1a1a;
+	font-weight: 700;
 }
 
-.view-mode {
+.list-mode {
 	text-align: center;
 }
 
 .hint {
 	margin-top: 1rem;
 	font-size: 0.9rem;
-	color: #666;
+	color: #595959;
+	font-weight: 500;
+}
+
+/* View Details Styles */
+.view-details {
+	animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+	from {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.detail-header {
+	margin-bottom: 1.5rem;
+	padding-bottom: 1rem;
+	border-bottom: 2px solid #e0e0e0;
+}
+
+.detail-header h3 {
+	margin: 0 0 0.5rem 0;
+	font-size: 1.3rem;
+	color: #2c3e50;
+}
+
+.location-badge {
+	display: inline-block;
+	background: #2196F3;
+	color: white;
+	padding: 0.25rem 0.75rem;
+	border-radius: 12px;
+	font-size: 0.85rem;
+	font-weight: 500;
+}
+
+.detail-section {
+	margin-bottom: 1.5rem;
+}
+
+.detail-item {
+	margin-bottom: 1rem;
+}
+
+.detail-label {
+	display: block;
+	font-weight: 700;
+	color: #1a1a1a;
+	font-size: 0.85rem;
+	margin-bottom: 0.25rem;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.detail-value {
+	display: block;
+	color: #2c3e50;
+	font-size: 1rem;
+}
+
+.detail-value.coordinates {
+	font-family: monospace;
+	font-size: 0.9rem;
+	color: #4a4a4a;
+	font-weight: 500;
+}
+
+.location-icon {
+	margin-right: 0.5rem;
+}
+
+.water-type-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+}
+
+.water-tag {
+	padding: 0.4rem 0.8rem;
+	border-radius: 16px;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: white;
+}
+
+.water-tag-still {
+	background: #2196F3;
+}
+
+.water-tag-sparkling {
+	background: #FF6B6B;
+}
+
+.water-tag-filtered {
+	background: #4CAF50;
+}
+
+.detail-description {
+	margin: 0.5rem 0 0 0;
+	color: #4a4a4a;
+	line-height: 1.5;
+	font-size: 0.95rem;
 }
 
 .form-group {
@@ -700,11 +868,13 @@ function escapeXml(str: string): string {
 .form-group select,
 .form-group textarea {
 	width: 100%;
-	padding: 0.5rem;
+	padding: 0.75rem;
 	border: 1px solid #ddd;
 	border-radius: 4px;
-	font-size: 0.9rem;
+	font-size: 1rem;
 	font-family: inherit;
+	min-height: 44px;
+	touch-action: manipulation;
 }
 
 .form-group input[type="text"]:focus,
@@ -727,7 +897,8 @@ function escapeXml(str: string): string {
 	display: block;
 	margin-top: 0.25rem;
 	font-size: 0.8rem;
-	color: #666;
+	color: #595959;
+	font-weight: 500;
 }
 
 .checkbox-group label {
@@ -737,24 +908,32 @@ function escapeXml(str: string): string {
 }
 
 .checkbox-group input[type="checkbox"] {
-	margin-right: 0.5rem;
+	margin-right: 0.75rem;
 	cursor: pointer;
+	width: 20px;
+	height: 20px;
+	min-width: 20px;
+	min-height: 20px;
 }
 
 .button-group {
 	display: flex;
-	gap: 0.5rem;
+	gap: 0.75rem;
 	flex-wrap: wrap;
+	margin-top: 1rem;
 }
 
 button {
-	padding: 0.6rem 1rem;
+	padding: 0.75rem 1.25rem;
 	border: none;
 	border-radius: 4px;
-	font-size: 0.9rem;
+	font-size: 1rem;
 	font-weight: 600;
 	cursor: pointer;
 	transition: all 0.2s;
+	min-height: 44px;
+	min-width: 44px;
+	touch-action: manipulation;
 }
 
 .btn-primary {
@@ -797,6 +976,7 @@ button:focus {
 		position: static;
 		border-radius: 0;
 		margin-bottom: 0.5rem;
+		padding: 1rem;
 	}
 	
 	.control-panel {
@@ -804,6 +984,56 @@ button:focus {
 		max-width: 100%;
 		border-radius: 0;
 		max-height: none;
+		padding: 1.25rem;
+	}
+	
+	button {
+		padding: 1rem 1.5rem;
+		font-size: 1.1rem;
+		min-height: 48px;
+	}
+	
+	.button-group {
+		gap: 1rem;
+	}
+	
+	.form-group input[type="text"],
+	.form-group select,
+	.form-group textarea {
+		padding: 1rem;
+		font-size: 1.1rem;
+		min-height: 48px;
+	}
+	
+	.form-group label {
+		font-size: 1rem;
+		margin-bottom: 0.75rem;
+	}
+	
+	.detail-header h3 {
+		font-size: 1.5rem;
+	}
+	
+	.location-badge {
+		font-size: 1rem;
+		padding: 0.5rem 1rem;
+	}
+	
+	.water-tag {
+		padding: 0.5rem 1rem;
+		font-size: 1rem;
+	}
+	
+	.legend-item {
+		font-size: 1rem;
+		min-height: 40px;
+		padding: 0.5rem 0;
+	}
+	
+	.legend-symbol {
+		width: 24px;
+		height: 24px;
+		margin-right: 1rem;
 	}
 	
 	.map-container {
